@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
-
 import * as d3 from 'd3'
+
+import { client } from './lib/gql'
+import { gql } from '@apollo/client'
 
 interface Link {
   source: string
@@ -27,7 +29,52 @@ function App() {
     console.log('use effect')
   }, [links])
 
+  async function queryGql() {
+    const gqlResult = await client.query({
+      query: gql`
+        query {
+          viewer {
+            login
+          }
+        }
+      `
+    })
+
+    console.log(gqlResult)
+  }
+
+  useEffect(() => {
+    queryGql()
+  }, [])
+
   // Functions
+
+  async function queryVulnerability(packageName: string) {
+    const vulnerability = await client.query({
+      query: gql`
+        query {
+          securityVulnerabilities(first: 100, ecosystem: NPM, package: "${packageName}") {
+            #totalCount
+            nodes {
+              package {
+                name
+              }
+              firstPatchedVersion {
+                identifier
+              }
+              severity
+              vulnerableVersionRange
+              advisory {
+                permalink
+              }
+            }
+          }
+        }
+      `
+    })
+
+    return vulnerability
+  }
 
   function linkArc(d: any) {
     const r = Math.hypot(d.target.x - d.source.x, d.target.y - d.source.y)
@@ -94,7 +141,13 @@ function App() {
         .attr('stroke-width', 1.5)
         .attr('r', 4)
         // .attr('fill', d => color(d.id))
-        .attr('fill', '#fff')
+        .attr('fill', (d: any) => {
+          console.log(d)
+          if (d.vulnerabilitiesCount.length > 0) {
+            return '#f00'
+          }
+          return '#fff'
+        })
 
     node.append('text')
         .attr('x', 8)
@@ -117,19 +170,41 @@ function App() {
     return svg.node()
   }
 
-  function readPackageJson(json: any) {
-    const dependencies = Array.from(
+  async function readPackageJson(json: any) {
+    const bigPromise: Promise<any>[] = []
+
+    const dependencies = Object.keys(json.dependencies)
+      .map((id) => {
+        bigPromise.push(
+          new Promise(async (resolve: any) => {
+            const vulnerability = await queryVulnerability(id)
+
+            const node = {
+              id,
+              version: json.dependencies[id],
+              vulnerabilitiesCount: vulnerability.data.securityVulnerabilities.nodes,
+            }
+            resolve(node)
+          })
+        )
+
+        return ({ id, version: json.dependencies[id] })
+      })
+
+    // console.log('dependencies', dependencies)
+    const vulnerabilities = await Promise.all(bigPromise)
+    console.log('vulnerabilities', vulnerabilities)
+
+    const nodes = Array.from(
       new Set(
         [
-          ...Object.keys(json.dependencies)
-            .map(id => ({ id, version: json.dependencies[id] })),
-          { id: json.name, version: json.version || '' },
+          ...vulnerabilities,
+          { id: json.name, version: json.version || '', vulnerabilitiesCount: [] },
         ]
       )
     )
-    const nodes = dependencies
 
-    const links = dependencies.reduce((stack: Link[], next: any) => {
+    const links = vulnerabilities.reduce((stack: Link[], next: any) => {
       const link: Link = {
         source: json.name,
         target: next.id,
@@ -151,6 +226,11 @@ function App() {
 
     setNodes(nodes)
     setLinks(links)
+
+    // nodes.forEach(async (node) => {
+    //   const vulnerability = await queryVulnerability(node.id)
+    //   console.log(vulnerability.data.securityVulnerabilities.nodes)
+    // })
   }
 
   function readFile(file: File) {

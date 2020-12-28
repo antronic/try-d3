@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 
 import { client } from './lib/gql'
@@ -10,26 +10,49 @@ interface Link {
   version: string
 }
 
-const height: number = 600
-const width: number = 600
+enum NODE_TYPE { ROOT, DEP }
 
-// const colors = d3.scaleOrdinal()
+const height: number = 300
+const width: number = 300
+
+
+const Loading = (props: any) => {
+  const [progress, setProgress] = useState(0)
+
+  useEffect(() => {
+    setProgress(props.progress)
+  }, [props.progress])
+
+  return (
+    <div>
+      <p>{progress}%</p>
+      <div style={{ width: '100%', height: '40px', position: 'relative' }}>
+        <div style={{ width: progress + '%', height: '100%', background: '#0ff', transition: 'all ease 1s' }}/>
+      </div>
+    </div>
+  )
+}
+
 
 function App() {
   const [links, setLinks] = useState<Link[]>([])
   const [nodes, setNodes] = useState<any[]>([])
-  let svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any> = d3.select('#somewhere')
+  const [progress, setProgress] = useState<number>(0)
+  const [username, setUsername] = useState<string>('')
+
+  const svgRef = useRef<d3.Selection<d3.BaseType, unknown, HTMLElement, any>>(d3.select('#somewhere'))
 
   useEffect(() => {
-    svg = d3.select('#chart')
-  }, [links])
-
-  useEffect(() => {
+    svgRef.current = d3.select('#chart')
     renderChart()
     console.log('use effect')
+
+    return (() => {
+      d3.selectAll('#chart > *').remove()
+    })
   }, [links])
 
-  async function queryGql() {
+  async function testGithubAuth() {
     const gqlResult = await client.query({
       query: gql`
         query {
@@ -41,10 +64,11 @@ function App() {
     })
 
     console.log(gqlResult)
+    setUsername(gqlResult.data.viewer.login)
   }
 
   useEffect(() => {
-    queryGql()
+    testGithubAuth()
   }, [])
 
   // Functions
@@ -95,11 +119,11 @@ function App() {
         .force('y', d3.forceY())
 
 
-    svg.attr('viewBox', `${[-width / 2, -height / 2, width, height]}`)
+    svgRef.current.attr('viewBox', `${[-width / 2, -height / 2, width, height]}`)
         .style('font', '12px sans-serif')
 
     // Per-type markers, as they don't inherit styles.
-    svg.append('defs')
+    svgRef.current.append('defs')
       .selectAll('marker')
       .data(['test'])
       .join('marker')
@@ -116,9 +140,9 @@ function App() {
 
 
     // const url = (d: any) => `url(${new URL(`#arrow-${d.type}`, window.location.href)})`
-    const url = (d: any) => `url(${new URL('#arrow', window.location.href)})`
+    const url = () => `url(${new URL('#arrow', window.location.href)})`
 
-    const link = svg.append('g')
+    const link = svgRef.current.append('g')
         .attr('fill', 'none')
         .attr('stroke-width', 1.5)
       .selectAll('path')
@@ -128,7 +152,7 @@ function App() {
         .attr('stroke','#ff0')
         .attr('marker-end', url)
 
-    const node = svg.append('g')
+    const node = svgRef.current.append('g')
         // .attr('fill', '#f00')
         .attr('stroke-linecap', 'round')
         .attr('stroke-linejoin', 'round')
@@ -137,16 +161,23 @@ function App() {
       .join('g')
 
     node.append('circle')
-        .attr('stroke', 'white')
+        .attr('stroke', (d: any) => {
+          if (d.type === NODE_TYPE.ROOT) {
+            return '#0ff'
+          }
+          return '#fff'
+        })
         .attr('stroke-width', 1.5)
         .attr('r', 4)
         // .attr('fill', d => color(d.id))
         .attr('fill', (d: any) => {
-          console.log(d)
+          if (d.type === NODE_TYPE.ROOT) {
+            return '#f0f'
+          }
           if (d.vulnerabilitiesCount.length > 0) {
             return '#f00'
           }
-          return '#fff'
+          return '#0ff'
         })
 
     node.append('text')
@@ -166,40 +197,40 @@ function App() {
       link.attr('d', linkArc)
       node.attr('transform', d => `translate(${d.x},${d.y})`)
     })
-
-    return svg.node()
   }
 
   async function readPackageJson(json: any) {
-    const bigPromise: Promise<any>[] = []
+    const deps = json.dependencies || {}
+    const devDeps = json.devDependencies || {}
 
-    const dependencies = Object.keys(json.dependencies)
-      .map((id) => {
-        bigPromise.push(
-          new Promise(async (resolve: any) => {
-            const vulnerability = await queryVulnerability(id)
+    const dependencies = Object.assign(deps, devDeps)
 
-            const node = {
-              id,
-              version: json.dependencies[id],
-              vulnerabilitiesCount: vulnerability.data.securityVulnerabilities.nodes,
-            }
-            resolve(node)
-          })
-        )
+    setProgress(0)
+    let done = 0
+    const vulnerabilitiesPromises: Promise<any>[] = Object.keys(dependencies).map((id) => {
+        return new Promise(async (resolve: any) => {
+          const vulnerability = await queryVulnerability(id)
 
-        return ({ id, version: json.dependencies[id] })
+          const node = {
+            id,
+            version: dependencies[id],
+            vulnerabilitiesCount: vulnerability.data.securityVulnerabilities.nodes,
+            type: NODE_TYPE.DEP,
+          }
+
+          setProgress(++done / Object.keys(dependencies).length * 100)
+          resolve(node)
+        })
       })
 
-    // console.log('dependencies', dependencies)
-    const vulnerabilities = await Promise.all(bigPromise)
+    const vulnerabilities = await Promise.all(vulnerabilitiesPromises)
     console.log('vulnerabilities', vulnerabilities)
 
     const nodes = Array.from(
       new Set(
         [
           ...vulnerabilities,
-          { id: json.name, version: json.version || '', vulnerabilitiesCount: [] },
+          { id: json.name, version: json.version || '', vulnerabilitiesCount: [], type: NODE_TYPE.ROOT },
         ]
       )
     )
@@ -226,11 +257,6 @@ function App() {
 
     setNodes(nodes)
     setLinks(links)
-
-    // nodes.forEach(async (node) => {
-    //   const vulnerability = await queryVulnerability(node.id)
-    //   console.log(vulnerability.data.securityVulnerabilities.nodes)
-    // })
   }
 
   function readFile(file: File) {
@@ -260,8 +286,13 @@ function App() {
   }
 
   return (
-    <div>
+    <div className="container">
       <input onChange={handleFileChange} type="file"/>
+      <p>
+        <strong>Github User: </strong>
+        <span>{username}</span>
+      </p>
+      <Loading progress={progress}/>
       <svg id="chart" />
     </div>
   )

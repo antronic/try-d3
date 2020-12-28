@@ -1,75 +1,33 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 
 import * as d3 from 'd3'
-// import {} from '@d3'
 
-const links = [
-  { source: 'project', target: 'n2', type: 't1' },
-  { source: 'project', target: 'n3', type: 't1' },
-  { source: 'project', target: 'n5', type: 't1' },
-  { source: 'n3', target: 'n4', type: 't2' },
-]
-
-const types = Array.from(new Set(links.map(d => d.type)))
-const data = ({
-  nodes: Array.from(
-    new Set(
-      links.flatMap(l => [l.source, l.target])
-    ),
-    id => ({ id })
-  ),
-  links
-})
-const color = d3.scaleOrdinal(types, d3.schemeCategory10)
+interface Link {
+  source: string
+  target: string
+  version: string
+}
 
 const height: number = 600
 const width: number = 600
 
+// const colors = d3.scaleOrdinal()
+
 function App() {
+  const [links, setLinks] = useState<Link[]>([])
+  const [nodes, setNodes] = useState<any[]>([])
+  let svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any> = d3.select('#somewhere')
+
+  useEffect(() => {
+    svg = d3.select('#chart')
+  }, [links])
+
   useEffect(() => {
     renderChart()
     console.log('use effect')
-  })
+  }, [links])
 
   // Functions
-
-  function drag(
-    selection: d3.Selection<Element | d3.EnterElement | Document | Window | SVGGElement | null, any, SVGGElement, unknown>,
-    simulation: d3.Simulation<any, undefined>) {
-
-    console.log('drag')
-
-    function dragstarted(event: any, d: any) {
-      console.log('start')
-      if (!event.active) simulation.alphaTarget(0.3).restart()
-      d.fx = d.x
-      d.fy = d.y
-    }
-
-    function dragged(this: any, event: any, d: any) {
-      // console.log('drag')
-      // d.fx = event.x
-      // d.fy = event.y
-      const me = d3.select(this)
-      me.attr('x', event.x)
-      me.attr('y', event.y)
-    }
-
-    function dragended(event: any, d: any) {
-      console.log('end')
-      if (!event.active) simulation.alphaTarget(0)
-      d.fx = null
-      d.fy = null
-    }
-
-    return d3.drag()
-      // .on("start", dragstarted)
-      .on("drag", dragged)
-      // .on("end", dragended)
-
-    // return selection
-  }
-
 
   function linkArc(d: any) {
     const r = Math.hypot(d.target.x - d.source.x, d.target.y - d.source.y)
@@ -81,10 +39,7 @@ function App() {
 
 
   function renderChart() {
-    let svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any> = d3.select('#chart')
-
-    const links = data.links.map(d => Object.create(d))
-    const nodes = data.nodes.map(d => Object.create(d))
+    // let svg: d3.Selection<d3.BaseType, unknown, HTMLElement, any> = d3.select('#chart')
 
     const simulation: d3.Simulation<any, undefined> = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).id((d: any) => d.id))
@@ -99,9 +54,9 @@ function App() {
     // Per-type markers, as they don't inherit styles.
     svg.append('defs')
       .selectAll('marker')
-      .data(types)
+      .data(['test'])
       .join('marker')
-        .attr('id', d => `arrow-${d}`)
+        .attr('id', 'arrow')
         .attr('viewBox', '0 -5 10 10')
         .attr('refX', 15)
         .attr('refY', -0.5)
@@ -109,13 +64,12 @@ function App() {
         .attr('markerHeight', 6)
         .attr('orient', 'auto')
       .append('path')
-        .attr('fill', color)
+        .attr('fill', '#ff0')
         .attr('d', 'M0,-5L10,0L0,5')
-      // .data(data.nodes)
-      //   .join('marker')
-      //   .attr('id', d => `node-${d.id}`)
 
-    const url = (d: any) => `url(${new URL(`#arrow-${d.type}`, window.location.href)})`
+
+    // const url = (d: any) => `url(${new URL(`#arrow-${d.type}`, window.location.href)})`
+    const url = (d: any) => `url(${new URL('#arrow', window.location.href)})`
 
     const link = svg.append('g')
         .attr('fill', 'none')
@@ -123,7 +77,8 @@ function App() {
       .selectAll('path')
       .data(links)
       .join('path')
-        .attr('stroke', d => color(d.type))
+        // .attr('stroke', d => color(d.type))
+        .attr('stroke','#ff0')
         .attr('marker-end', url)
 
     const node = svg.append('g')
@@ -133,17 +88,13 @@ function App() {
       .selectAll('g')
       .data(nodes)
       .join('g')
-        // .attr('fill', d => color(d.id))
-        // .call((
-        //   selection: d3.Selection<Element | d3.EnterElement | Document | Window | SVGGElement | null, any, SVGGElement, unknown>) =>
-        //     drag(selection, simulation)
-        //   )
 
     node.append('circle')
         .attr('stroke', 'white')
         .attr('stroke-width', 1.5)
         .attr('r', 4)
-        .attr('fill', d => color(d.id))
+        // .attr('fill', d => color(d.id))
+        .attr('fill', '#fff')
 
     node.append('text')
         .attr('x', 8)
@@ -153,10 +104,10 @@ function App() {
       .clone(true).lower()
         .attr('fill', 'none')
 
-    node.call((
-      selection: d3.Selection<Element | d3.EnterElement | Document | Window | SVGGElement | null, any, SVGGElement, unknown>) =>
-        drag(selection, simulation)
-      )
+    // node.call((
+    //   selection: d3.Selection<Element | d3.EnterElement | Document | Window | SVGGElement | null, any, SVGGElement, unknown>) =>
+    //     drag(selection, simulation)
+    //   )
 
     simulation.on('tick', () => {
       link.attr('d', linkArc)
@@ -168,17 +119,38 @@ function App() {
 
   function readPackageJson(json: any) {
     const dependencies = Array.from(
-      new Set(Object.keys(json.dependencies).map(id => ({ id })))
+      new Set(
+        [
+          ...Object.keys(json.dependencies)
+            .map(id => ({ id, version: json.dependencies[id] })),
+          { id: json.name, version: json.version || '' },
+        ]
+      )
     )
     const nodes = dependencies
 
-    console.log(nodes)
-    const links = dependencies.map((dep) => ({
-      source: json.name,
-      target: dep.id,
-    }))
+    const links = dependencies.reduce((stack: Link[], next: any) => {
+      const link: Link = {
+        source: json.name,
+        target: next.id,
+        version: next.version,
+      }
 
+      if (link.source !== link.target) {
+        return ([
+          ...stack,
+          link
+        ])
+      }
+
+      return stack
+    }, [])
+
+    console.log(nodes)
     console.log(links)
+
+    setNodes(nodes)
+    setLinks(links)
   }
 
   function readFile(file: File) {
